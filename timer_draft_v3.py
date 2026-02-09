@@ -3,6 +3,10 @@ import time
 import i2c_lcd
 from rotary_irq import RotaryIRQ
 
+# Using a package from Mike Teachman (2021)
+# For the HW - 040 Rotary Encoder
+# https://opensource.org/licenses/MIT
+
 class RotIRQ:
     def __init__(self):
         # Correctly passing arguments to the library constructor
