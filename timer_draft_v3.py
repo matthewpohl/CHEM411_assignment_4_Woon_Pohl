@@ -1,0 +1,120 @@
+from machine import Pin, I2C
+import time
+import i2c_lcd
+from rotary_irq import RotaryIRQ
+
+class RotIRQ:
+    def __init__(self):
+        # Correctly passing arguments to the library constructor
+        self.encoder = RotaryIRQ(pin_num_clk=13, 
+                                 pin_num_dt=14, 
+                                 min_val=0, 
+                                 max_val=60, 
+                                 reverse=False, 
+                                 range_mode=RotaryIRQ.RANGE_WRAP)
+
+    def value(self):
+        return self.encoder.value()
+
+class Display:
+    def __init__(self):
+        self.i2c = I2C(0, scl=Pin(22), sda=Pin(23))
+        self.lcd = i2c_lcd.I2cLcd(self.i2c, 0x27, 2, 16)
+
+    def update_screen(self, mins, secs, mode):
+        self.lcd.clear()
+        label = "Set Mins" if mode else "Set Secs"
+        self.lcd.putstr(f"{label}:{mins:02d}:{secs:02d}")
+
+    def show_countdown(self, m, s):
+        self.lcd.clear()
+        self.lcd.putstr("T-Minus:{:02d}:{:02d}".format(m, s))
+
+    def times_up(self):
+        self.lcd.clear()
+        self.lcd.putstr("TIME'S UP!")
+
+class Buzzer:
+    def __init__(self):
+        self.pin = Pin(19, Pin.OUT, value=1)
+
+    def buzz(self, startButton, resetButton):
+        if resetButton.value() == 1:
+            for i in range(100):
+                self.pin.value(1)
+                time.sleep_ms(100)
+                self.pin.value(0)
+                time.sleep_ms(100)
+
+                if startButton.value() == 0 or resetButton.value() == 0:
+                    self.pin.value(1)
+                    break
+
+class TimerData:
+    def __init__(self):
+        self.mins = 0
+        self.secs = 0
+        self.minMode = True 
+    
+    def total_seconds(self):
+        return (self.mins * 60) + self.secs
+    
+    def reset(self):
+        self.mins = 0
+        self.secs = 0
+
+class SetupTimer:
+    def __init__(self):
+        self.display = Display()
+        self.buzzer = Buzzer()
+        self.timer = TimerData()
+        self.rotencoder = RotIRQ()
+
+        self.startButton = Pin(12, Pin.IN, Pin.PULL_UP)
+        self.modeButton = Pin(4, Pin.IN, Pin.PULL_UP)
+        self.resetButton = Pin(15, Pin.IN)
+
+        self.old_val = self.rotencoder.value()
+
+    def Run(self):
+        self.display.update_screen(self.timer.mins, self.timer.secs, self.timer.minMode)
+        while True:
+            self.CheckRotary()
+            self.CheckMode()
+            if self.startButton.value() == 0:
+                self.Countdown()
+
+    def CheckMode(self):
+        if self.modeButton.value() == 0:
+            self.timer.minMode = not self.timer.minMode
+            self.display.update_screen(self.timer.mins, self.timer.secs, self.timer.minMode)
+            time.sleep(0.3) # Debounce
+
+    def CheckRotary(self):
+        new_val = self.rotencoder.value()
+        if self.old_val != new_val:
+            if self.timer.minMode:
+                self.timer.mins = new_val
+            else:
+                self.timer.secs = new_val
+            self.old_val = new_val
+            self.display.update_screen(self.timer.mins, self.timer.secs, self.timer.minMode)
+
+    def Countdown(self):
+        total = self.timer.total_seconds()
+        for remaining in range(total, -1, -1):
+            if self.resetButton.value() == 0: # Cancel timer
+                break
+            m, s = divmod(remaining, 60)
+            self.display.show_countdown(m, s)
+            if remaining == 0:
+                self.display.times_up()
+                self.buzzer.buzz(self.startButton, self.resetButton)
+            time.sleep(1)
+        
+        self.timer.reset()
+        self.display.update_screen(0, 0, True)
+
+# Main Execution
+device = SetupTimer()
+device.Run()
